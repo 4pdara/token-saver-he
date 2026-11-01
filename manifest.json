@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "token-saver-he",
+  "version": "4.0.0",
+  "description": "תרגום הודעות מעברית לאנגלית לפני שליחה באתרי צ׳אט, עם בועה נגררת להפעלה ולכיבוי.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://translate.googleapis.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "token-saver-he"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*",
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
