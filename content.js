@@ -1,5 +1,5 @@
 (() => {
-  console.log('[token-saver-he v4.0.0] light & draggable');
+  console.log('[token-saver-he v4.0.1] light & draggable');
   const HEB_RE = /[\u0590-\u05FF]/g;
   const isHebrew = t => t && t.length>3 && (t.match(HEB_RE)||[]).length / t.length > 0.22;
   
@@ -158,30 +158,122 @@
     const chunks=[]; for(let j=0;j<text.length;j+=800) chunks.push(text.slice(j,j+800));
     let full=''; for(const ch of chunks){
       const url=`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(ch)}`;
-      const r=await fetch(url); const d=await r.json(); full+=d[0].map(x=>x[0]).join(''); await new Promise(r=>setTimeout(r,40));
+      const r=await fetch(url);
+      if(!r.ok) throw new Error(`Translation failed: ${r.status}`);
+      const d=await r.json(); full+=d[0].map(x=>x[0]).join(''); await new Promise(r=>setTimeout(r,40));
     } return full;
   }
-  function findInput(){
-    let el=document.querySelector('div[contenteditable="true"][data-placeholder]'); if(el) return el;
-    el=document.querySelector('div[contenteditable="true"]'); if(el) return el;
-    el=document.querySelector('#prompt-textarea'); if(el) return el;
-    return document.querySelector('textarea');
+  function findInput(root=document){
+    for(const selector of ['#prompt-textarea', 'div[contenteditable="true"][data-placeholder]', 'div[contenteditable="true"]', 'textarea']){
+      const input=Array.from(root.querySelectorAll(selector)).find(el=>el.getClientRects().length && !el.disabled && !el.readOnly);
+      if(input) return input;
+    }
+    return null;
   }
 
   let busy=false;
-  document.addEventListener('keydown', async e=>{
-    if(busy||!enabled||e.key!=='Enter'||e.shiftKey||e.isComposing) return;
-    const input=findInput(); if(!input) return;
-    let txt=input.tagName==='TEXTAREA'?input.value:(input.innerText||'');
-    if(!txt.trim()||!isHebrew(txt)) return;
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); busy=true;
+  let sending=false;
+  const readInput=input=>input.tagName==='TEXTAREA'?input.value:(input.innerText||'');
+
+  function stopSubmission(event){
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function isSendButton(button,input){
+    if(button.disabled || button.getAttribute('aria-disabled')==='true') return false;
+    if(button.matches('[data-testid="send-button"]')) return true;
+    const label=(button.getAttribute('aria-label')||button.getAttribute('title')||'').trim();
+    const actionLabel=label.split(/\s*[\[(]/,1)[0].trim();
+    if(/^(send(?: message| prompt)?|שליחה|שלח|שליחת הודעה|שלח הודעה)$/i.test(actionLabel)) return true;
+    const form=input.closest('form');
+    return !!form && button.form===form && button.type==='submit';
+  }
+
+  function findSendButton(input){
+    // Prefer the nearest composer, so another chat or feedback form cannot be sent.
+    const form=input.closest('form');
+    for(let root=input.parentElement; root; root=root.parentElement){
+      const button=Array.from(root.querySelectorAll('button,input[type="submit"],[role="button"]'))
+        .find(el=>el.getClientRects().length && isSendButton(el,input));
+      if(button) return button;
+      if(root===form) break;
+    }
+    return null;
+  }
+
+  function findButtonInput(button){
+    const form=button.closest('form');
+    if(form) return findInput(form);
+    for(let root=button.parentElement; root; root=root.parentElement){
+      const input=findInput(root);
+      if(input) return input;
+    }
+    return null;
+  }
+
+  function writeInput(input,text){
+    if(input.tagName==='TEXTAREA'){
+      // Bypass a framework's value tracker, then notify its input handler.
+      const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;
+      setter.call(input,text);
+    } else {
+      input.focus();
+      document.execCommand('selectAll',false,null);
+      document.execCommand('insertText',false,text);
+    }
+    input.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));
+  }
+
+  async function translateAndSend(event,input,clickedButton=null){
+    if(sending || !enabled) return;
+    if(busy){ stopSubmission(event); return; }
+    const original=readInput(input);
+    if(!original.trim() || !isHebrew(original)) return;
+    stopSubmission(event);
+    busy=true;
     try{
-      const {text:prot,store}=protect(txt);
+      const {text:prot,store}=protect(original);
       const trans=await translateFree(prot);
       const finalEn=restore(trans,store);
-      if(input.tagName==='TEXTAREA'){ input.value=finalEn; input.dispatchEvent(new Event('input',{bubbles:true})); }
-      else{ input.focus(); document.execCommand('selectAll',false,null); document.execCommand('insertText',false,finalEn); input.dispatchEvent(new InputEvent('input',{bubbles:true})); }
-      setTimeout(()=>{ busy=false; const ev=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,bubbles:true}); input.dispatchEvent(ev); const btn=document.querySelector('button[aria-label*="Send"]')||document.querySelector('[data-testid="send-button"]'); if(btn) btn.click(); },100);
-    }catch(err){ console.error(err); busy=false; }
+      // Do not overwrite a draft edited while the translation was in flight.
+      if(!input.isConnected || readInput(input)!==original || !enabled) return;
+      writeInput(input,finalEn);
+      await new Promise(resolve=>setTimeout(resolve,100));
+      if(!input.isConnected || readInput(input)!==finalEn || !enabled) return;
+      const button=clickedButton?.isConnected && isSendButton(clickedButton,input)
+        ? clickedButton : findSendButton(input);
+      sending=true;
+      if(button){
+        button.click();
+      } else if(input.closest('form')){
+        input.closest('form').requestSubmit();
+      } else {
+        input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,bubbles:true,cancelable:true}));
+      }
+    }catch(err){ console.error(err); }
+    finally { sending=false; busy=false; }
+  }
+
+  // Capture before the site's composer handlers, including handlers on document.
+  window.addEventListener('keydown',e=>{
+    if(!(e.target instanceof Element) || e.key!=='Enter' || e.shiftKey || e.isComposing) return;
+    const input=findInput(e.target.closest('form')||document);
+    if(!input || !input.contains(e.target)) return;
+    void translateAndSend(e,input);
+  },true);
+
+  window.addEventListener('click',e=>{
+    if(!(e.target instanceof Element)) return;
+    const button=e.target.closest('button,input[type="submit"],[role="button"]');
+    if(!button) return;
+    const input=findButtonInput(button);
+    if(!input || !isSendButton(button,input)) return;
+    void translateAndSend(e,input,button);
+  },true);
+
+  window.addEventListener('submit',e=>{
+    const input=findInput(e.target);
+    if(input) void translateAndSend(e,input,e.submitter);
   }, true);
 })();

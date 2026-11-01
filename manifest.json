@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "token-saver-he",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "תרגום הודעות מעברית לאנגלית לפני שליחה באתרי צ׳אט, עם בועה נגררת להפעלה ולכיבוי.",
   "permissions": [
     "storage"
