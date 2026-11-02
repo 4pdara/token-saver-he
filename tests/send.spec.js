@@ -6,7 +6,7 @@ const original = 'שלום לך, מה שלומך היום?';
 const translated = 'Hello, how are you today?';
 
 // These local pages model composer event handling. No real chat or Google request is sent.
-function composerPage({ editable = false, form = true, button = 'testid' } = {}) {
+function composerPage({ editable = false, form = true, button = 'testid', clearAfterSend = false } = {}) {
   const editor = editable
     ? '<div id="prompt-textarea" contenteditable="true" data-placeholder="Message"></div>'
     : '<textarea id="prompt-textarea"></textarea>';
@@ -46,7 +46,14 @@ function composerPage({ editable = false, form = true, button = 'testid' } = {})
       }
       window.sent = [];
       window.otherSubmits = 0;
-      window.send = () => window.sent.push(draft);
+      window.send = () => {
+        window.sent.push(draft);
+        if (${JSON.stringify(clearAfterSend)}) {
+          if (editor.tagName === 'TEXTAREA') editor.value = '';
+          else editor.replaceChildren();
+          draft = '';
+        }
+      };
       document.addEventListener('keydown', event => {
         if (editor.contains(event.target) && event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault(); window.send();
@@ -82,12 +89,13 @@ const test = base.extend({
       let releaseTranslation;
       const gate = options.hold ? new Promise(resolve => { releaseTranslation = resolve; }) : Promise.resolve();
       await context.route('https://translate.googleapis.com/**', async route => {
-        requests.push(new URL(route.request().url()).searchParams.get('q'));
+        const sourceText = new URL(route.request().url()).searchParams.get('q');
+        requests.push(sourceText);
         await gate;
         await route.fulfill({
           status: options.fail ? 503 : 200,
           headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
-          body: JSON.stringify([[[options.translation || translated]], null, 'iw']),
+          body: JSON.stringify([[[options.translations?.[sourceText] || options.translation || translated]], null, 'iw']),
         });
       });
       const origin = options.claude ? 'https://claude.ai' : 'https://chatgpt.com';
@@ -246,4 +254,73 @@ test('replacement send button after an input update is used once', async ({ crea
   await page.locator('#send').click();
   await expectOneSend(page);
   expect(requests).toEqual([original]);
+});
+
+for (const [site, options] of [
+  ['Claude', { editable: true, form: false, button: 'claude', claude: true }],
+  ['ChatGPT', {}],
+]) {
+  for (const trigger of ['arrow', 'Enter']) {
+    test(`rapid short Hebrew replies are all translated: ${site} ${trigger}`, async ({ createApp }) => {
+      const replies = [['כן', 'Yes'], ['לא', 'No'], ['היי', 'Hi'], ['תודה', 'Thanks'], ['מעולה', 'Great'], ['מצוין', 'Excellent']];
+      const { page, input, requests } = await createApp({
+        ...options, clearAfterSend: true, translations: Object.fromEntries(replies),
+      });
+      const expected = [];
+      for (const [source, translation] of replies) {
+        await input.fill(source);
+        if (trigger === 'arrow') await page.locator('#send svg').click();
+        else await input.press('Enter');
+        expected.push(translation);
+        await expect.poll(() => page.evaluate(() => window.sent)).toEqual(expected);
+        await expect(input).toBeEmpty();
+      }
+      expect(requests).toEqual(replies.map(([source]) => source));
+      await page.waitForTimeout(200);
+      expect(await page.evaluate(() => window.sent)).toEqual(expected);
+    });
+  }
+}
+
+test('a single Hebrew letter is translated', async ({ createApp }) => {
+  const { page, input, requests } = await createApp({ translation: 'A' });
+  await input.fill('א');
+  await page.locator('#send').click();
+  await expectOneSend(page, 'A');
+  expect(requests).toEqual(['א']);
+});
+
+test('short non-Hebrew drafts pass through without a translation request', async ({ createApp }) => {
+  const { page, input, requests } = await createApp({
+    editable: true, form: false, button: 'claude', claude: true, clearAfterSend: true,
+  });
+  const drafts = ['OK', '123', '🙂', '?!'];
+  for (const draft of drafts) {
+    await input.fill(draft);
+    await page.locator('#send').click();
+  }
+  expect(await page.evaluate(() => window.sent)).toEqual(drafts);
+  expect(requests).toEqual([]);
+});
+
+test('a short draft stays safe during another translation and can be retried', async ({ createApp }) => {
+  const { page, input, requests, releaseTranslation } = await createApp({
+    editable: true, form: false, button: 'claude', claude: true,
+    hold: true, translations: { 'כן': 'Yes' },
+  });
+  await page.locator('#send').click();
+  await expect.poll(() => requests.length).toBe(1);
+  await input.fill('כן');
+  await page.locator('#send svg').click();
+  await input.press('Enter');
+  expect(await page.evaluate(() => window.sent)).toEqual([]);
+  const response = page.waitForResponse(response => response.url().startsWith('https://translate.googleapis.com/'));
+  releaseTranslation();
+  await response;
+  await page.waitForTimeout(100);
+  expect(await input.innerText()).toBe('כן');
+  expect(await page.evaluate(() => window.sent)).toEqual([]);
+  await page.locator('#send svg').click();
+  await expectOneSend(page, 'Yes');
+  expect(requests).toEqual([original, 'כן']);
 });

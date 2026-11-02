@@ -1,7 +1,8 @@
 (() => {
-  console.log('[token-saver-he v4.0.2] light & draggable');
+  console.log('[token-saver-he v4.0.3] short Hebrew replies');
   const HEB_RE = /[\u0590-\u05FF]/g;
-  const isHebrew = t => t && t.length>3 && (t.match(HEB_RE)||[]).length / t.length > 0.22;
+  // Hebrew replies can be a single letter; do not bypass them because of length.
+  const isHebrew = t => t && (t.match(HEB_RE)||[]).length / t.length > 0.22;
   
   let enabled = true;
   let pos = { top: 20, right: 20 }; // default
