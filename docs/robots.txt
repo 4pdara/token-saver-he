@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://4pdara.github.io/token-saver-he/sitemap.xml

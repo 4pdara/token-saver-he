@@ -1,0 +1,17 @@
+const examples=[["he","עברית","rtl","בואו נהפוך את הרעיון הזה לתוכנית ברורה שאפשר להתחיל ליישם.","Let’s turn this idea into a clear plan we can start putting into action."]];
+const copy={"placeholder":"כאן תופיע ההודעה המתורגמת.","ready":"ההדגמה הושלמה. בתוסף, הטיוטה המתורגמת נשלחת לצ׳אט.","off":"התרגום כבוי. ההודעה המקורית נשארת בעברית."};
+const menu=document.querySelector('.menu-toggle');
+const nav=document.querySelector('.navigation');
+menu.addEventListener('click',()=>{const expanded=menu.getAttribute('aria-expanded')!=='true';menu.setAttribute('aria-expanded',String(expanded));nav.classList.toggle('is-open',expanded);});
+nav.addEventListener('click',event=>{if(event.target.closest('a')){menu.setAttribute('aria-expanded','false');nav.classList.remove('is-open');}});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&menu.getAttribute('aria-expanded')==='true'){menu.setAttribute('aria-expanded','false');nav.classList.remove('is-open');menu.focus();}});
+const select=document.querySelector('#example-language');
+const toggle=document.querySelector('.demo-toggle');
+const source=document.querySelector('#example-source');
+const result=document.querySelector('#example-result');
+const resultCard=document.querySelector('.sample-result');
+const status=document.querySelector('.demo-status');
+const reset=()=>{result.textContent=copy.placeholder;result.removeAttribute('lang');result.removeAttribute('dir');result.classList.add('result-placeholder');resultCard.classList.remove('is-ready');status.textContent='';};
+select?.addEventListener('change',()=>{const example=examples.find(item=>item[0]===select.value);source.textContent=example[3];source.lang=example[0];source.dir=example[2];reset();});
+toggle.addEventListener('click',()=>{toggle.setAttribute('aria-pressed',String(toggle.getAttribute('aria-pressed')!=='true'));reset();});
+document.querySelector('.demo-send').addEventListener('click',()=>{const example=examples.find(item=>item[0]===(select?.value||'he'));const on=toggle.getAttribute('aria-pressed')==='true';result.textContent=on?example[4]:example[3];result.lang=on?'en':example[0];result.dir=on?'ltr':example[2];result.classList.remove('result-placeholder');resultCard.classList.add('is-ready');status.textContent=on?copy.ready:copy.off;});
